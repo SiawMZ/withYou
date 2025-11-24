@@ -1,30 +1,29 @@
 "use client";
-import { useAuth } from '../context/AuthContext';
-import { useRouter } from 'next/navigation';
-import { useEffect, ComponentType } from 'react';
-import { auth } from '../lib/firebase';
+import { useAuth } from "../context/AuthContext";
+"use client";
+import { useAuth } from "../context/AuthContext";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
-const withAuth = <P extends object>(Component: ComponentType<P>) => {
-  return function WithAuth(props: P) {
+export default function withAuth(Component: any) {
+  return function ProtectedRoute(props: any) {
     const { user, loading } = useAuth();
     const router = useRouter();
 
     useEffect(() => {
+      // Only redirect if Auth check is DONE (loading=false) and NO USER found.
       if (!loading && !user) {
-        // Double check with auth.currentUser to avoid race conditions
-        // Sometimes context might be slightly behind or in a weird state
-        if (!auth.currentUser) {
-          router.push('/');
-        }
+        router.replace("/"); // Use replace to stop Back-button loops
       }
-    }, [user, loading, router]);
+    }, [user, loading]);
 
-    if (loading || !user) {
-      return <div>Loading...</div>;
-    }
+    // If still checking Auth, return nothing (The AuthProvider spinner handles visuals)
+    if (loading) return null;
 
+    // If check done but no user, return null (useEffect will redirect)
+    if (!user) return null;
+
+    // User is logged in! Render the page.
     return <Component {...props} />;
   };
-};
-
-export default withAuth;
+}

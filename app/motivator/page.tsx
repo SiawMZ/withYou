@@ -4,10 +4,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import withAuth from '../../components/withAuth';
 import { useAuth } from '../../context/AuthContext';
 import { firestore, auth, storage } from '../../lib/firebase';
-import { collection, query, where, getDocs, doc, getDoc, setDoc, Timestamp, onSnapshot, updateDoc, deleteDoc, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, setDoc, Timestamp, onSnapshot, updateDoc, deleteDoc, orderBy, addDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { isToday } from '../../lib/streak';
 import Image from 'next/image';
+import CreateMissionModal from '../../components/CreateMissionModal';
+import MissionVerificationModal from '../../components/MissionVerificationModal';
 
 interface Milestone {
   id: number;
@@ -34,13 +36,20 @@ interface Notification {
   createdAt: any;
 }
 
-function MotivatorPage() {
-  const { userData } = useAuth();
-  const [challengers, setChallengers] = useState<Challenger[]>([]);
-  const [selectedChallenger, setSelectedChallenger] = useState<Challenger | null>(null);
-  const [showModal, setShowModal] = useState(false);
+interface Mission {
+  id: string;
+  from: string;
+  to: string;
+  title: string;
+  description: string;
+  deadline: any;
+  reward: string;
   const [sending, setSending] = useState(false);
   
+    // Mission tracking state
+  const [missions, setMissions] = useState<Mission[]>([]);
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [selectedMissionForVerification, setSelectedMissionForVerification] = useState<Mission | null>(null);
   // Detail Modal State
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [detailChallenger, setDetailChallenger] = useState<Challenger | null>(null);
@@ -53,6 +62,10 @@ function MotivatorPage() {
   const [messageType, setMessageType] = useState<'motivation' | 'congrats'>('motivation');
   const [messageText, setMessageText] = useState('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  // Mission Modal States
+  const [showCreateMissionModal, setShowCreateMissionModal] = useState(false);
+  const [selectedChallengerForMission, setSelectedChallengerForMission] = useState<Challenger | null>(null);
+
 
   // Fetch Challengers
   useEffect(() => {
@@ -112,6 +125,30 @@ function MotivatorPage() {
     return () => unsubscribe();
   }, []);
 
+  // Fetch Missions (Real-time)
+  useEffect(() => {
+    if (!auth.currentUser) return;
+
+    const q = query(
+      collection(firestore, 'missions'),
+      where('from', '==', auth.currentUser.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const missionsData: Mission[] = [];
+      snapshot.forEach((doc) => {
+        missionsData.push({ id: doc.id, ...doc.data() } as Mission);
+      });
+      setMissions(missionsData);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+    const getChallenger = (challengerId: string) => {
+    return challengers.find(c => c.id === challengerId);
+  };
+
   const handleOpenModal = (challenger: Challenger) => {
     setSelectedChallenger(challenger);
     setShowModal(true);
@@ -135,7 +172,7 @@ function MotivatorPage() {
 
     setSending(true);
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toLocaleDateString('en-CA');
       const timestamp = Date.now();
       const motivationId = `${auth.currentUser.uid}_${selectedChallenger.id}_${timestamp}`;
 
@@ -239,62 +276,177 @@ function MotivatorPage() {
           </div>
         )}
         
-        <h2 className="text-2xl font-bold mb-6 text-[var(--color-text)]">Your Challengers</h2>
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {challengers.length > 0 ? (
-            challengers.map((challenger) => (
-              <div key={challenger.id} className="bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-sm border border-white/50 hover-card">
-                <div 
-                  className="cursor-pointer mb-4" 
-                  onClick={() => handleOpenDetailModal(challenger)}
-                >
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h2 className="text-xl font-bold text-[var(--color-text)] hover:text-[var(--color-primary)] transition-colors">{challenger.username}</h2>
-                      <p className="text-sm text-[var(--color-text)] opacity-60">{challenger.goalName || 'No goal set'}</p>
-                    </div>
-                    {challenger.lastCompleted && isToday(challenger.lastCompleted.toDate()) ? (
-                      <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-1 rounded-full">
-                        Done
-                      </span>
-                    ) : (
-                      <span className="bg-yellow-100 text-yellow-700 text-xs font-bold px-2 py-1 rounded-full">
-                        Pending
-                      </span>
-                    )}
-                  </div>
+        {/* Tabbed Content */}
+        <div className="mb-6">
+          {/* Tab Navigation */}
+          <div className="flex gap-4 mb-6 border-b-2 border-gray-200">
+            <button
+              onClick={() => setActiveTab('challengers')}
+              className={`pb-3 px-4 font-bold text-lg transition-colors relative ${
+                activeTab === 'challengers'
+                  ? 'text-[var(--color-primary)]'
+                  : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              Your Challengers
+              {activeTab === 'challengers' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-primary)]"></div>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('missions')}
+              className={`pb-3 px-4 font-bold text-lg transition-colors relative ${
+                activeTab === 'missions'
+                  ? 'text-purple-600'
+                  : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              Active Missions
+              {missions.filter(m => m.status === 'verifying').length > 0 && (
+                <span className="ml-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full">
+                  {missions.filter(m => m.status === 'verifying').length}
+                </span>
+              )}
+              {activeTab === 'missions' && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-600"></div>
+              )}
+            </button>
+          </div>
 
-                  {challenger.milestones && challenger.milestones.length > 0 && (
-                    <div className="mb-4 bg-[var(--color-secondary)]/50 rounded-xl p-3">
-                      <h3 className="text-xs font-bold text-[var(--color-text)] opacity-50 uppercase tracking-wider mb-2">Progress</h3>
-                      <div className="flex flex-wrap gap-1">
-                        {challenger.milestones.map((m) => (
-                          <div 
-                            key={m.id} 
-                            className={`w-2 h-2 rounded-full ${m.completed ? 'bg-[var(--color-primary)]' : 'bg-gray-300'}`}
-                            title={challenger.shareMilestones ? m.description : `Milestone ${m.id}`}
-                          />
-                        ))}
+          {/* Challengers Tab Content */}
+          {activeTab === 'challengers' && (
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {challengers.length > 0 ? (
+                challengers.map((challenger) => (
+                  <div key={challenger.id} className="bg-white/80 backdrop-blur-sm p-6 rounded-2xl shadow-sm border border-white/50 hover-card">
+                    <div 
+                      className="cursor-pointer mb-4" 
+                      onClick={() => handleOpenDetailModal(challenger)}
+                    >
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <h2 className="text-xl font-bold text-[var(--color-text)] hover:text-[var(--color-primary)] transition-colors">{challenger.username}</h2>
+                          <p className="text-sm text-[var(--color-text)] opacity-60">{challenger.goalName || 'No goal set'}</p>
+                        </div>
+                        {challenger.lastCompleted && isToday(challenger.lastCompleted.toDate()) ? (
+                          <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-1 rounded-full">
+                            Done
+                          </span>
+                        ) : (
+                          <span className="bg-yellow-100 text-yellow-700 text-xs font-bold px-2 py-1 rounded-full">
+                            Pending
+                          </span>
+                        )}
                       </div>
-                      <p className="text-xs text-[var(--color-text)] mt-2 opacity-70">
-                        {challenger.milestones.filter(m => m.completed).length} / {challenger.milestones.length} Milestones
-                      </p>
-                    </div>
-                  )}
-                </div>
 
-                <button
-                  onClick={() => handleOpenModal(challenger)}
-                  className="w-full bg-[var(--color-primary)] text-white py-3 px-4 rounded-xl font-semibold hover:bg-[var(--color-accent)] transition-colors shadow-sm flex items-center justify-center"
-                >
-                  <span className="mr-2">🚀</span> Send Boost
-                </button>
-              </div>
-            ))
-          ) : (
-            <div className="col-span-full text-center py-12 glass-panel rounded-2xl">
-              <p className="text-[var(--color-text)] opacity-50 mb-4">You don't have any challengers yet.</p>
-              <a href="/profile" className="text-[var(--color-primary)] font-bold hover:underline">Add friends in Profile</a>
+                      {challenger.milestones && challenger.milestones.length > 0 && (
+                        <div className="mb-4 bg-[var(--color-secondary)]/50 rounded-xl p-3">
+                          <h3 className="text-xs font-bold text-[var(--color-text)] opacity-50 uppercase tracking-wider mb-2">Progress</h3>
+                          <div className="flex flex-wrap gap-1">
+                            {challenger.milestones.map((m) => (
+                              <div 
+                                key={m.id} 
+                                className={`w-2 h-2 rounded-full ${m.completed ? 'bg-[var(--color-primary)]' : 'bg-gray-300'}`}
+                                title={challenger.shareMilestones ? m.description : `Milestone ${m.id}`}
+                              />
+                            ))}
+                          </div>
+                          <p className="text-xs text-[var(--color-text)] mt-2 opacity-70">
+                            {challenger.milestones.filter(m => m.completed).length} / {challenger.milestones.length} Milestones
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => handleOpenModal(challenger)}
+                      className="w-full bg-[var(--color-primary)] text-white py-3 px-4 rounded-xl font-semibold hover:bg-[var(--color-accent)] transition-colors shadow-sm flex items-center justify-center"
+                    >
+                      <span className="mr-2">🚀</span> Send Boost
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setSelectedChallengerForMission(challenger);
+                        setShowCreateMissionModal(true);
+                      }}
+                      className="w-full mt-2 bg-purple-500 text-white py-3 px-4 rounded-xl font-semibold hover:bg-purple-600 transition-colors shadow-sm flex items-center justify-center"
+                    >
+                      <span className="mr-2">🎯</span> Send Mission
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="col-span-full text-center py-12 glass-panel rounded-2xl">
+                  <p className="text-[var(--color-text)] opacity-50 mb-4">You don't have any challengers yet.</p>
+                  <a href="/profile" className="text-[var(--color-primary)] font-bold hover:underline">Add friends in Profile</a>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Missions Tab Content */}
+          {activeTab === 'missions' && (
+            <div className="space-y-4">
+              {missions.filter(m => ['on-going', 'verifying', 'pending'].includes(m.status)).length > 0 ? (
+                missions
+                  .filter(m => ['on-going', 'verifying', 'pending'].includes(m.status))
+                  .map((mission) => {
+                    const challenger = getChallenger(mission.to);
+                    return (
+                      <div
+                        key={mission.id}
+                        className={`p-6 rounded-xl flex justify-between items-center transition-all ${
+                          mission.status === 'verifying'
+                            ? 'bg-yellow-50 border-2 border-yellow-300 shadow-md'
+                            : 'bg-white/80 backdrop-blur-sm border border-white/50'
+                        }`}
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <p className="font-bold text-xl text-[var(--color-text)]">{mission.title}</p>
+                            <span
+                              className={`text-xs px-3 py-1 rounded-full font-semibold ${
+                                mission.status === 'pending'
+                                  ? 'bg-gray-200 text-gray-700'
+                                  : mission.status === 'on-going'
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : 'bg-yellow-100 text-yellow-700'
+                              }`}
+                            >
+                              {mission.status === 'pending' && '📤 Pending'}
+                              {mission.status === 'on-going' && '⏳ In Progress'}
+                              {mission.status === 'verifying' && '🔍 Needs Review'}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-600 mb-2">
+                            For: <span className="font-semibold">{challenger?.username || 'Unknown'}</span>
+                          </p>
+                          <p className="text-sm text-gray-700 mb-2">{mission.description}</p>
+                          <div className="flex gap-4 text-xs text-gray-600">
+                            <span>📅 Deadline: {mission.deadline?.toDate?.()?.toLocaleDateString() || 'N/A'}</span>
+                            <span>🎁 Reward: {mission.reward}</span>
+                          </div>
+                        </div>
+                        {mission.status === 'verifying' && (
+                          <button
+                            onClick={() => {
+                              setSelectedMissionForVerification(mission);
+                              setShowVerificationModal(true);
+                            }}
+                            className="ml-6 bg-purple-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-purple-600 transition-colors shadow-md"
+                          >
+                            Review Proof
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
+              ) : (
+                <div className="text-center py-12 glass-panel rounded-2xl">
+                  <p className="text-[var(--color-text)] opacity-50">No active missions</p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -522,6 +674,31 @@ function MotivatorPage() {
           </div>
         )}
       </div>
+
+              {/* Create Mission Modal */}
+        {showCreateMissionModal && selectedChallengerForMission && (
+          <CreateMissionModal
+            challengerId={selectedChallengerForMission.id}
+            challengerName={selectedChallengerForMission.username}
+            onClose={() => {
+              setShowCreateMissionModal(false);
+              setSelectedChallengerForMission(null);
+            }}
+          />
+        )}
+
+                {/* Mission Verification Modal */}
+        {showVerificationModal && selectedMissionForVerification && (
+          <MissionVerificationModal
+            mission={selectedMissionForVerification}
+            challengerName={getChallenger(selectedMissionForVerification.to)?.username || 'Unknown'}
+            onClose={() => {
+              setShowVerificationModal(false);
+              setSelectedMissionForVerification(null);
+            }}
+          />
+        )}
+
     </div>
   );
 }

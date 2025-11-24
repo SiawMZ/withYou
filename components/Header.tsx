@@ -15,10 +15,15 @@ const Header = () => {
     { href: "/settings", label: "Settings" },
   ];
 
-  // Hide header if not logged in
-  // Don't hide during loading to prevent flashing during page transitions
-  if (!loading && !user) {
-    return null;
+  // FIX: Don't return null. If loading, keep the header to prevent layout jump.
+  // If not logged in, you can return an empty <header> or null, 
+  // but returning null often causes hydration errors in Next.js if the server rendered it differently.
+  
+  const showNavigation = !loading && user;
+
+  if (!showNavigation) {
+    // Return an empty placeholder of the same height to prevent layout shift
+    return <header className="h-20 pointer-events-none"></header>;
   }
 
   return (

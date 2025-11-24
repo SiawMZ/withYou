@@ -2,6 +2,7 @@
 import withAuth from '../../components/withAuth';
 import Confetti from '../../components/Confetti';
 import MilestonePopup from '../../components/MilestonePopup';
+import MissionBoard from '../../components/MissionBoard';
 import { useState, useEffect } from 'react';
 import { firestore, auth, storage } from '../../lib/firebase';
 import { doc, setDoc, getDoc, updateDoc, arrayUnion, Timestamp, collection, query, where, getDocs, addDoc, deleteDoc } from 'firebase/firestore';
@@ -10,6 +11,7 @@ import { isToday } from '../../lib/streak';
 import Image from 'next/image';
 import { useAuth } from '../../context/AuthContext';
 import { SeedIcon, SproutIcon, TrophyIcon } from '../../components/Icons';
+
 
 interface Milestone {
   id: number;
@@ -49,7 +51,7 @@ const RANK_MILESTONES = [
 ];
 
 function ChallengerPage() {
-  const { userData } = useAuth();
+  const { user,userData, dataLoading } = useAuth();
   const [showConfetti, setShowConfetti] = useState(false);
   const [showMilestonePopup, setShowMilestonePopup] = useState(false);
   const [newRank, setNewRank] = useState('');
@@ -69,52 +71,96 @@ function ChallengerPage() {
   const [isMilestoneModalOpen, setIsMilestoneModalOpen] = useState(false);
   const [milestoneEditDesc, setMilestoneEditDesc] = useState('');
 
-  useEffect(() => {
-    const fetchGoalAndMotivations = async () => {
-      if (auth.currentUser) {
-        setLoadingMotivations(true);
-        
-        const docRef = doc(firestore, 'goals', auth.currentUser.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data() as Goal;
-          if (!data.milestones) {
-            data.milestones = Array.from({ length: 7 }, (_, i) => ({
-              id: i + 1,
-              description: `Milestone ${i + 1}`,
-              completed: false
-            }));
-            await updateDoc(docRef, { milestones: data.milestones });
-          }
-          setCurrentGoal(data);
-        }
 
-        const today = new Date().toISOString().split('T')[0];
-        const motivationsRef = collection(firestore, 'motivations');
-        const q = query(motivationsRef, 
-          where('to', '==', auth.currentUser.uid),
-          where('date', '==', today)
-        );
-        const motivationSnap = await getDocs(q);
-        const loadedMotivations: Motivation[] = [];
-        motivationSnap.forEach((doc) => {
-          const data = doc.data();
-          loadedMotivations.push({
-            id: doc.id,
-            motivationMessage: data.motivationMessage,
-            motivationImageUrl: data.motivationImageUrl,
-            congratsMessage: data.congratsMessage,
-            congratsImageUrl: data.congratsImageUrl,
-            type: data.type,
-            saved: data.saved || false
-          });
-        });
-        setAllMotivations(loadedMotivations);
-        setLoadingMotivations(false);
+  useEffect(() => {
+  const fetchGoalAndMotivations = async () => {
+    // Guard clause: Stop if no user
+    if (!user?.uid) return;
+
+    try {
+      setLoadingMotivations(true);
+
+      const docRef = doc(firestore, 'goals', user.uid);  // Use user.uid directly
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        const data = docSnap.data() as Goal;
+        if (!data.milestones) {
+          data.milestones = Array.from({ length: 7 }, (_, i) => ({
+            id: i + 1,
+            description: `Milestone ${i + 1}`,
+            completed: false
+          }));
+          await updateDoc(docRef, { milestones: data.milestones });
+        }
+        setCurrentGoal(data);
       }
-    };
-    fetchGoalAndMotivations();
-  }, []);
+
+const today = new Date().toLocaleDateString('en-CA');
+const motivationsRef = collection(firestore, 'motivations');
+
+// Fetch today's messages
+const todayQuery = query(motivationsRef, 
+  where('to', '==', user.uid),
+  where('date', '==', today)
+);
+
+// Fetch saved messages
+const savedQuery = query(motivationsRef,
+  where('to', '==', user.uid),
+  where('saved', '==', true)
+);
+
+const [todaySnap, savedSnap] = await Promise.all([
+  getDocs(todayQuery),
+  getDocs(savedQuery)
+]);
+
+const loadedMotivations: Motivation[] = [];
+const addedIds = new Set<string>(); // Prevent duplicates
+
+// Add today's messages
+todaySnap.forEach((doc) => {
+  const data = doc.data();
+  addedIds.add(doc.id);
+  loadedMotivations.push({
+    id: doc.id,
+    motivationMessage: data.motivationMessage,
+    motivationImageUrl: data.motivationImageUrl,
+    congratsMessage: data.congratsMessage,
+    congratsImageUrl: data.congratsImageUrl,
+    type: data.type,
+    saved: data.saved || false
+  });
+});
+
+// Add saved messages (skip if already added from today)
+savedSnap.forEach((doc) => {
+  if (!addedIds.has(doc.id)) {
+    const data = doc.data();
+    loadedMotivations.push({
+      id: doc.id,
+      motivationMessage: data.motivationMessage,
+      motivationImageUrl: data.motivationImageUrl,
+      congratsMessage: data.congratsMessage,
+      congratsImageUrl: data.congratsImageUrl,
+      type: data.type,
+      saved: data.saved || false
+    });
+  }
+});
+
+setAllMotivations(loadedMotivations);
+    } catch (error) {
+      console.error("Error fetching data:", error);
+    } finally {
+      setLoadingMotivations(false);
+    }
+  };
+  
+  fetchGoalAndMotivations();
+  
+}, []);
 
   const isCompletedToday = currentGoal?.lastCompleted && isToday(currentGoal.lastCompleted.toDate());
 
@@ -393,7 +439,7 @@ function ChallengerPage() {
     );
   }
 
-  return (
+ return (
     <div className="min-h-screen flex flex-col p-4 pt-24 bg-transparent">
       <Confetti active={showConfetti} onComplete={handleConfettiComplete} />
       
@@ -404,6 +450,7 @@ function ChallengerPage() {
         />
       )}
 
+      {/* Header Section */}
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold text-[var(--color-text)]">
           {currentGoal ? currentGoal.name : 'My Journey'}
@@ -423,6 +470,7 @@ function ChallengerPage() {
         )}
       </div>
       
+      {/* Milestones Progress Bar */}
       {currentGoal && (
         <div className="mb-4 overflow-x-auto pb-2 no-scrollbar">
           <div className="flex justify-center min-w-max px-4 gap-6 md:gap-8 mx-auto">
@@ -436,13 +484,9 @@ function ChallengerPage() {
                         ? 'text-[var(--color-primary)] scale-110 drop-shadow-md' 
                         : 'text-gray-300 group-hover:text-[var(--color-primary)] group-hover:scale-105'}`}
                   >
-                    {isLast ? (
-                      <TrophyIcon className="w-12 h-12" />
-                    ) : milestone.completed ? (
-                      <SproutIcon className="w-12 h-12" />
-                    ) : (
-                      <SeedIcon className="w-12 h-12" />
-                    )}
+                    {isLast ? <TrophyIcon className="w-12 h-12" /> : 
+                     milestone.completed ? <SproutIcon className="w-12 h-12" /> : 
+                     <SeedIcon className="w-12 h-12" />}
                   </div>
                   <span className={`text-[9px] mt-1 font-bold transition-colors ${milestone.completed ? 'text-[var(--color-primary)]' : 'text-gray-400'}`}>
                     M{milestone.id}
@@ -454,12 +498,37 @@ function ChallengerPage() {
         </div>
       )}
 
-      <div className="flex-grow flex flex-col justify-center items-center relative">
+      {/* Main Content Area - Split into Two Columns */}
+      <div className="flex-grow flex flex-col items-center lg:flex-row lg:items-start lg:justify-center gap-6 relative">
         
-        {currentGoal ? (
-          <>
-            {isCompletedToday ? (
-              <div className={`transition-opacity duration-500 ease-in-out text-center animate-fade-in glass-panel p-8 rounded-3xl max-w-md w-full ${fade ? 'opacity-100' : 'opacity-0'}`}>
+        {/* LEFT COLUMN: Changes based on Goal Status (Active vs Completed vs New) */}
+        <div className="w-full max-w-md flex flex-col items-center">
+          {currentGoal ? (
+            isCompletedToday ? (
+              // --- SCENARIO 1: Goal Done Today ---
+              <div className={`transition-opacity duration-500 ease-in-out text-center animate-fade-in glass-panel p-8 rounded-3xl w-full relative  ${fade ? 'opacity-100' : 'opacity-0'}`}>
+                
+                {currentMotivation && (
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleSaveMotivation(currentMotivation);
+                    }}
+                    className="absolute top-4 right-4 p-3 rounded-full bg-white/20 backdrop-blur-md hover:bg-white/40 transition-all transform hover:scale-110 group/btn z-20"
+                    title={currentMotivation.saved ? "Unsave" : "Save to Memories"}
+                  >
+                    <svg 
+                      xmlns="http://www.w3.org/2000/svg" 
+                      className={`h-6 w-6 transition-colors ${currentMotivation.saved ? 'text-red-500 fill-current' : 'text-gray-600'}`} 
+                      fill="none" 
+                      viewBox="0 0 24 24" 
+                      stroke="currentColor"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                    </svg>
+                  </button>
+                )}
+                
                 <div className="relative w-full h-[40vh] mx-auto mb-6">
                    <Image 
                     src={currentMotivation?.congratsImageUrl || "/great_job_cat.png"} 
@@ -468,14 +537,14 @@ function ChallengerPage() {
                     className="object-contain drop-shadow-xl"
                   />
                 </div>
-                <h3 className="3xl font-bold text-[var(--color-primary)] mb-2">
+                <h3 className="text-3xl font-bold text-[var(--color-primary)] mb-2">
                   {currentMotivation?.congratsMessage || "You did a great Job today!"}
                 </h3>
                 <p className="text-[var(--color-text)] opacity-70">See you tomorrow!</p>
               </div>
             ) : (
-              <div className="w-full max-w-md flex flex-col items-center">
-                
+              // --- SCENARIO 2: Goal Not Done (Show Motivation + Upload) ---
+              <>
                 <div className={`transition-opacity duration-500 ease-in-out w-full flex flex-col items-center ${fade ? 'opacity-100' : 'opacity-0'}`}>
                   {loadingMotivations ? (
                     <div className="w-full flex items-center justify-center py-12">
@@ -505,15 +574,9 @@ function ChallengerPage() {
                           toggleSaveMotivation(currentMotivation);
                         }}
                         className="absolute top-4 right-4 p-3 rounded-full bg-white/20 backdrop-blur-md hover:bg-white/40 transition-all transform hover:scale-110 group/btn z-20"
-                        title={currentMotivation.saved ? "Unsave" : "Save to Memories"}
                       >
-                        <svg 
-                          xmlns="http://www.w3.org/2000/svg" 
-                          className={`h-6 w-6 transition-colors ${currentMotivation.saved ? 'text-red-500 fill-current' : 'text-white'}`} 
-                          fill="none" 
-                          viewBox="0 0 24 24" 
-                          stroke="currentColor"
-                        >
+                        {/* Save Icon SVG */}
+                        <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 transition-colors ${currentMotivation.saved ? 'text-red-500 fill-current' : 'text-white'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                         </svg>
                       </button>
@@ -523,87 +586,61 @@ function ChallengerPage() {
                       <div className="relative w-64 h-64 mx-auto mb-6">
                         <Image src="/welcome_home_cat.png" alt="Welcome" fill className="object-contain" />
                       </div>
-                      <h2 className="2xl font-bold text-[var(--color-text)]">Ready to grow?</h2>
+                      <h2 className="text-2xl font-bold text-[var(--color-text)]">Ready to grow?</h2>
                       <p className="text-[var(--color-text)] mt-2">Upload your proof to start the day.</p>
                     </div>
                   )}
                 </div>
 
                 <div className="mt-8 relative group z-10">
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    onChange={handleFileChange}
-                    id="file-upload"
-                    className="hidden"
-                  />
-                  <label 
-                    htmlFor="file-upload"
-                    className={`cursor-pointer flex items-center justify-center w-16 h-16 rounded-full bg-[var(--color-primary)] text-white shadow-xl hover:bg-[var(--color-accent)] hover:scale-110 transition-all duration-300 glass-icon border-4 border-white/30 ${uploading ? 'animate-pulse' : ''}`}
-                  >
-                    {selectedFile ? (
-                      <span className="text-2xl">✓</span>
-                    ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                    )}
+                  <input type="file" accept="image/*" onChange={handleFileChange} id="file-upload" className="hidden" />
+                  <label htmlFor="file-upload" className={`cursor-pointer flex items-center justify-center w-16 h-16 rounded-full bg-[var(--color-primary)] text-white shadow-xl hover:bg-[var(--color-accent)] hover:scale-110 transition-all duration-300 glass-icon border-4 border-white/30 ${uploading ? 'animate-pulse' : ''}`}>
+                    {selectedFile ? <span className="text-2xl">✓</span> : <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>}
                   </label>
-                  
-                  <div className="absolute inset-0 rounded-full bg-[var(--color-primary)] blur-xl opacity-40 -z-10 group-hover:opacity-60 transition-opacity duration-300"></div>
-
                   {selectedFile && (
-                    <button 
-                      onClick={handleUpload}
-                      disabled={uploading}
-                      className="absolute top-2 left-20 bg-[var(--color-accent)] text-green-500 px-6 py-2 rounded-full font-bold shadow-lg hover:bg-opacity-90 whitespace-nowrap transition-all animate-fade-in glass-panel border-none"
-                    >
+                    <button onClick={handleUpload} disabled={uploading} className="absolute top-2 left-20 bg-[var(--color-accent)] text-green-500 px-6 py-2 rounded-full font-bold shadow-lg hover:bg-opacity-90 whitespace-nowrap transition-all animate-fade-in glass-panel border-none">
                       {uploading ? 'Planting...' : 'Upload Proof'}
                     </button>
                   )}
                 </div>
-
+              </>
+            )
+          ) : (
+            // --- SCENARIO 3: No Goal Yet (Show Create Form) ---
+            <div className="w-full bg-white/80 backdrop-blur-md p-8 rounded-3xl shadow-xl border border-white/50 animate-scale-up">
+              <h2 className="text-2xl font-bold text-[var(--color-text)] mb-6 text-center">Plant a New Goal</h2>
+              <div className="space-y-5">
+                <div>
+                  <label className="block text-sm font-bold text-[var(--color-text)] opacity-70 mb-1">Goal Name</label>
+                  <input type="text" className="block w-full rounded-xl border-gray-200 bg-white/50 focus:border-[var(--color-primary)] p-3 transition-colors shadow-sm" value={goalName} onChange={(e) => setGoalName(e.target.value)} placeholder="e.g., Morning Jog" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-[var(--color-text)] opacity-70 mb-1">Description</label>
+                  <textarea rows={3} className="block w-full rounded-xl border-gray-200 bg-white/50 focus:border-[var(--color-primary)] p-3 transition-colors shadow-sm" value={goalDescription} onChange={(e) => setGoalDescription(e.target.value)} placeholder="What do you want to achieve?" />
+                </div>
+                <button onClick={createGoal} className="w-full py-3 px-4 rounded-xl text-white bg-[var(--color-primary)] hover:bg-[var(--color-accent)] font-bold shadow-md transition-all transform hover:scale-[1.02]">Start Growing</button>
               </div>
-            )}
-          </>
-        ) : (
-          <div className="w-full max-w-md bg-white/80 backdrop-blur-md p-8 rounded-3xl shadow-xl border border-white/50 animate-scale-up">
-            <h2 className="text-2xl font-bold text-[var(--color-text)] mb-6 text-center">Plant a New Goal</h2>
-            <div className="space-y-5">
-              <div>
-                <label className="block text-sm font-bold text-[var(--color-text)] opacity-70 mb-1">Goal Name</label>
-                <input
-                  type="text"
-                  className="block w-full rounded-xl border-gray-200 bg-white/50 focus:border-[var(--color-primary)] focus:ring-[var(--color-primary)] p-3 transition-colors shadow-sm"
-                  value={goalName}
-                  onChange={(e) => setGoalName(e.target.value)}
-                  placeholder="e.g., Morning Jog"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-[var(--color-text)] opacity-70 mb-1">Description</label>
-                <textarea
-                  rows={3}
-                  className="block w-full rounded-xl border-gray-200 bg-white/50 focus:border-[var(--color-primary)] focus:ring-[var(--color-primary)] p-3 transition-colors shadow-sm"
-                  value={goalDescription}
-                  onChange={(e) => setGoalDescription(e.target.value)}
-                  placeholder="What do you want to achieve?"
-                />
-              </div>
-              <button
-                onClick={createGoal}
-                className="w-full py-3 px-4 rounded-xl text-white bg-[var(--color-primary)] hover:bg-[var(--color-accent)] font-bold shadow-md transition-all transform hover:scale-[1.02]"
-              >
-                Start Growing
-              </button>
             </div>
-          </div>
+          )}
+        </div>
+
+        {/* RIGHT COLUMN: Mission Board - ALWAYS VISIBLE if a goal exists */}
+        {/* We keep this OUTSIDE the isCompletedToday logic */}
+        {currentGoal && (
+           <div className="w-full max-w-md lg:w-80 lg:max-w-none lg:flex-shrink-0 lg:ml-4">
+              <MissionBoard />
+           </div>
         )}
+
       </div>
 
+      {/* Modal Logic (Keep as is) */}
       {isMilestoneModalOpen && selectedMilestone && (
-        <div className="fixed inset-0 bg-white/10 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white/90 backdrop-blur-xl rounded-3xl p-8 max-w-sm w-full shadow-2xl transform transition-all scale-100 border border-white/50">
+         // ... your modal code ...
+         <div className="fixed inset-0 bg-white/10 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
+           {/* ... modal content ... */}
+           {/* (Just ensuring you keep this part) */}
+             <div className="bg-white/90 backdrop-blur-xl rounded-3xl p-8 max-w-sm w-full shadow-2xl transform transition-all scale-100 border border-white/50">
             <h3 className="text-2xl font-bold mb-6 text-[var(--color-text)] text-center">Milestone {selectedMilestone.id}</h3>
             
             <div className="mb-8">
@@ -648,7 +685,7 @@ function ChallengerPage() {
               </button>
             </div>
           </div>
-        </div>
+         </div>
       )}
     </div>
   );

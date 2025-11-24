@@ -3,36 +3,54 @@ import Link from 'next/link';
 import { useAuth } from '../context/AuthContext';
 import SignInButton from "../components/SignInButton";
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react'; // Add useRef
+import { usePathname } from 'next/navigation'; // Add this import
+
+
 
 export default function Home() {
-  const { user, userData, loading } = useAuth();
+  const { user, userData, loading, dataLoading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname(); // Get current path
+  const initialCheckDone = useRef(false); // Track if we've done the initial check
+
 
   useEffect(() => {
-    if (!loading && user) {
-      // If user is logged in:
-      // 1. If they have a username (profile complete) -> Redirect to Challenger Dashboard
-      // 2. If they don't have a username (profile incomplete) -> Redirect to Onboarding
-      if (userData && userData.username) {
-        router.push('/challenger');
-      } else {
-        router.push('/onboarding');
-      }
+    if (loading || dataLoading) {
+      initialCheckDone.current = false;
+      return;
     }
-  }, [user, userData, loading, router]);
+    
+    if (initialCheckDone.current) return;
+    
+    // STRICT CHECK: Only redirect if we are actually at the root path
+    if (pathname !== '/') return;
+    
+    if (user && userData !== null) {
+      initialCheckDone.current = true;
+      
+      const targetPath = userData.username ? '/challenger' : '/onboarding';
+      router.replace(targetPath);
+    }
+  }, [loading, dataLoading, user, userData, pathname, router]);
 
-  if (loading) {
+  if (loading || dataLoading) {
     return <div className="flex justify-center items-center h-screen bg-[var(--color-secondary)] text-[var(--color-primary)]">Loading...</div>;
   }
 
-  // If user is logged in, we are redirecting, so show loading/redirecting state
-  // This prevents the "Choose your Path" screen from flashing
-  if (user) {
-     return <div className="flex justify-center items-center h-screen bg-[var(--color-secondary)] text-[var(--color-primary)]">Redirecting...</div>;
+  // CRITICAL FIX: If we are logged in but NOT at root (e.g. /challenger), 
+  // we must return null so this component doesn't block the real page.
+  if (user && pathname !== '/') {
+    return null; 
   }
 
-  return (
+  // Only show "Redirecting..." if we are at root and about to redirect
+  if (user && pathname === '/') {
+    return <div className="flex justify-center items-center h-screen bg-[var(--color-secondary)] text-[var(--color-primary)]">Redirecting...</div>;
+  }
+
+// Landing page for non-logged-in users
+return (
     <div className="flex flex-col items-center justify-center min-h-screen py-2 bg-[var(--color-secondary)]">
       <main className="flex flex-col items-center justify-center w-full flex-1 px-20 text-center">
         <h1 className="text-6xl font-bold mb-8 text-[var(--color-text)]">

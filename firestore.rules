@@ -48,6 +48,18 @@ service cloud.firestore {
       allow delete: if request.auth != null && resource.data.to == request.auth.uid;
     }
 
+    // Missions:
+    // - Create: Motivator creates mission for challenger
+    // - Read: Both sender (motivator) and receiver (challenger) can read
+    // - Update: Challenger can accept/reject/submit proof, Motivator can verify
+    // - Delete: Either party can delete (e.g., on reject or unfriend)
+    match /missions/{missionId} {
+      allow create: if request.auth != null && request.resource.data.from == request.auth.uid;
+      allow read: if request.auth != null && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+      allow update: if request.auth != null && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+      allow delete: if request.auth != null && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+    }
+
     // Notifications:
     // - Create: Authenticated users can create notifications
     // - Read/Update: Users can read/update their own notifications
