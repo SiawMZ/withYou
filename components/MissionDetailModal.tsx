@@ -13,7 +13,7 @@ interface Mission {
   description: string;
   deadline: any;
   reward: string;
-  status: 'pending' | 'on-going' | 'verifying' | 'completed' | 'denied';
+  status: 'pending' | 'on-going' | 'verifying' | 'completed' | 'denied' | 'cancelled';
   proofUrl?: string;
   createdAt: any;
   acceptedAt?: any;

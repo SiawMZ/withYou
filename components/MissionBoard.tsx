@@ -16,7 +16,7 @@ interface Mission {
   description: string;
   deadline: any;
   reward: string;
-  status: 'pending' | 'on-going' | 'verifying' | 'completed' | 'denied';
+  status: 'pending' | 'on-going' | 'verifying' | 'completed' | 'denied' | 'cancelled';
   proofUrl?: string;
   createdAt: any;
   acceptedAt?: any;
@@ -59,7 +59,7 @@ const MissionBoard = ({ className = "" }: MissionBoardProps) => {
       });
 
       // Separate into wanted (active) and completed
-      setWantedMissions(missions.filter(m => m.status !== 'completed'));
+      setWantedMissions(missions.filter(m => m.status !== 'completed' && m.status !== 'cancelled'));
       setCompletedMissions(missions.filter(m => m.status === 'completed'));
     }, (error) => {
       console.error("Error fetching missions:", error);

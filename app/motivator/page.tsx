@@ -44,12 +44,25 @@ interface Mission {
   description: string;
   deadline: any;
   reward: string;
+  status: 'pending' | 'on-going' | 'verifying' | 'completed' | 'denied' | 'cancelled';
+  proofUrl?: string;
+  createdAt: any;
+  submittedAt?: any;
+}
+
+function MotivatorPage() {
+  const { userData } = useAuth();
+  const [challengers, setChallengers] = useState<Challenger[]>([]);
+  const [selectedChallenger, setSelectedChallenger] = useState<Challenger | null>(null);
+  const [activeTab, setActiveTab] = useState<'challengers' | 'missions'>('challengers');
+  const [showModal, setShowModal] = useState(false);
   const [sending, setSending] = useState(false);
   
-    // Mission tracking state
+  // Mission tracking state
   const [missions, setMissions] = useState<Mission[]>([]);
   const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [selectedMissionForVerification, setSelectedMissionForVerification] = useState<Mission | null>(null);
+  
   // Detail Modal State
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [detailChallenger, setDetailChallenger] = useState<Challenger | null>(null);
@@ -62,6 +75,7 @@ interface Mission {
   const [messageType, setMessageType] = useState<'motivation' | 'congrats'>('motivation');
   const [messageText, setMessageText] = useState('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  
   // Mission Modal States
   const [showCreateMissionModal, setShowCreateMissionModal] = useState(false);
   const [selectedChallengerForMission, setSelectedChallengerForMission] = useState<Challenger | null>(null);
@@ -145,7 +159,7 @@ interface Mission {
     return () => unsubscribe();
   }, []);
 
-    const getChallenger = (challengerId: string) => {
+  const getChallenger = (challengerId: string) => {
     return challengers.find(c => c.id === challengerId);
   };
 
@@ -200,18 +214,34 @@ interface Mission {
 
       alert('Daily Boost sent successfully!');
       setShowModal(false);
-    } catch (error) {
-      console.error("Error sending boost:", error);
-      alert("Failed to send. Please try again.");
-    } finally {
       setSending(false);
+    } catch (error) {
+      console.error("Error sending motivation:", error);
+      alert("Failed to send Daily Boost.");
+      setSending(false);
+    }
+  };
+
+  const handleCancelMission = async (missionId: string) => {
+    if (!auth.currentUser) return;
+    if (!window.confirm("Are you sure you want to cancel this mission?")) return;
+
+    try {
+      await updateDoc(doc(firestore, 'missions', missionId), {
+        status: 'cancelled'
+      });
+      alert('Mission cancelled successfully!');
+    } catch (error) {
+      console.error("Error cancelling mission:", error);
+      alert("Failed to cancel mission.");
     }
   };
 
   const markAsRead = async (notificationId: string) => {
     try {
-      const notifRef = doc(firestore, 'notifications', notificationId);
-      await updateDoc(notifRef, { read: true });
+      await updateDoc(doc(firestore, 'notifications', notificationId), {
+        read: true
+      });
     } catch (error) {
       console.error("Error marking notification as read:", error);
     }
@@ -428,17 +458,30 @@ interface Mission {
                             <span>🎁 Reward: {mission.reward}</span>
                           </div>
                         </div>
-                        {mission.status === 'verifying' && (
-                          <button
-                            onClick={() => {
-                              setSelectedMissionForVerification(mission);
-                              setShowVerificationModal(true);
-                            }}
-                            className="ml-6 bg-purple-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-purple-600 transition-colors shadow-md"
-                          >
-                            Review Proof
-                          </button>
-                        )}
+                        <div className="flex flex-col gap-2 ml-4">
+                          {mission.status === 'verifying' && (
+                            <button
+                              onClick={() => {
+                                setSelectedMissionForVerification(mission);
+                                setShowVerificationModal(true);
+                              }}
+                              className="bg-purple-500 text-white px-6 py-3 rounded-xl font-bold hover:bg-purple-600 transition-colors shadow-md"
+                            >
+                              Review Proof
+                            </button>
+                          )}
+                          {(mission.status === 'pending' || mission.status === 'on-going') && (
+                            <button
+                              onClick={() => handleCancelMission(mission.id)}
+                              className="text-red-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
+                              title="Cancel Mission"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })
@@ -675,30 +718,29 @@ interface Mission {
         )}
       </div>
 
-              {/* Create Mission Modal */}
-        {showCreateMissionModal && selectedChallengerForMission && (
-          <CreateMissionModal
-            challengerId={selectedChallengerForMission.id}
-            challengerName={selectedChallengerForMission.username}
-            onClose={() => {
-              setShowCreateMissionModal(false);
-              setSelectedChallengerForMission(null);
-            }}
-          />
-        )}
+      {/* Create Mission Modal */}
+      {showCreateMissionModal && selectedChallengerForMission && (
+        <CreateMissionModal
+          challengerId={selectedChallengerForMission.id}
+          challengerName={selectedChallengerForMission.username}
+          onClose={() => {
+            setShowCreateMissionModal(false);
+            setSelectedChallengerForMission(null);
+          }}
+        />
+      )}
 
-                {/* Mission Verification Modal */}
-        {showVerificationModal && selectedMissionForVerification && (
-          <MissionVerificationModal
-            mission={selectedMissionForVerification}
-            challengerName={getChallenger(selectedMissionForVerification.to)?.username || 'Unknown'}
-            onClose={() => {
-              setShowVerificationModal(false);
-              setSelectedMissionForVerification(null);
-            }}
-          />
-        )}
-
+      {/* Mission Verification Modal */}
+      {showVerificationModal && selectedMissionForVerification && (
+        <MissionVerificationModal
+          mission={selectedMissionForVerification}
+          challengerName={getChallenger(selectedMissionForVerification.to)?.username || 'Unknown'}
+          onClose={() => {
+            setShowVerificationModal(false);
+            setSelectedMissionForVerification(null);
+          }}
+        />
+      )}
     </div>
   );
 }
